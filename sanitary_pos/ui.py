@@ -13,6 +13,7 @@ import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from datetime import date, datetime
+from .config import get_data_dir, set_data_dir
 from .db import UserError, scaled, money, quantity, line_total
 from .printing import preview, receipt_text, receipt_number
 from .version import APP_VERSION
@@ -983,7 +984,7 @@ class App(ReturnActions, tk.Tk):
         self.button(controls,'Delete all products',self.delete_all_products)
         self.button(controls,'View QR',self.view_label)
         self.button(controls,'Print QR',self.print_label)
-        self.product_tree = self.table(frame,[('name','Product',210),('size','Size',100),('code','Code',100),('category','Category',120),('brand','Brand',110),('unit','Unit',80),('price','Selling Price',110),('stock','Stock',90)])
+        self.product_tree = self.table(frame,[('name','Product',210),('size','Size',100),('code','Code',100),('location','Location',140),('category','Category',120),('brand','Brand',110),('unit','Unit',80),('price','Selling Price',110),('stock','Stock',90)])
         self.product_tree.configure(selectmode='extended')
         batch = ttk.Frame(frame)
         batch.pack(fill='x')
@@ -1029,7 +1030,7 @@ class App(ReturnActions, tk.Tk):
         batch()
 
     def refresh_products(self, immediate=False):
-        rows = [dict(iid=str(p['id']),values=(p['name'],p['size_variant'] or '—',p['code'],p['category'],p['brand'],p['unit'],money(p['selling_paisa']),quantity(p['stock_milli']))) for p in self.store.products(self.product_search.get())]
+        rows = [dict(iid=str(p['id']),values=(p['name'],p['size_variant'] or '—',p['code'],p['location'],p['category'],p['brand'],p['unit'],money(p['selling_paisa']),quantity(p['stock_milli']))) for p in self.store.products(self.product_search.get())]
         self.render_rows(self.product_tree,rows,immediate)
 
     def product_dialog(self, product_id=None):
@@ -1042,6 +1043,7 @@ class App(ReturnActions, tk.Tk):
         frame = ttk.Frame(dialog,padding=22)
         frame.pack(fill='both',expand=True)
         fields = [('name','Product name *'),('code','Product code / SKU *'),('qr','QR value (blank = product code)'),('category','Category'),('brand','Brand'),('size_variant','Size / Variant (optional)'),('purchase','Purchase price (Rs.) *'),('selling','Selling price (Rs.) *'),('stock','Available quantity *'),('unit','Unit *'),('description','Description (optional)')]
+        fields.insert(6, ('location', 'Location / Shelf / Rack'))
         variables = {}
         for row,(key,label) in enumerate(fields):
             value = (str(p[{'purchase':'purchase_paisa','selling':'selling_paisa'}[key]]/100) if key in ('purchase','selling') else quantity(p['stock_milli']) if key=='stock' else p[key]) if p else {'purchase':'0','selling':'0','stock':'0','unit':'Piece'}.get(key,'')
@@ -1299,9 +1301,12 @@ class App(ReturnActions, tk.Tk):
         controls=ttk.Frame(frame)
         controls.pack(fill='x',pady=12)
         self.button(controls,'Save settings',self.save_settings,True)
+        self.button(controls,'Choose data folder',self.choose_data_folder)
         self.button(controls,'Update application',self.update_application)
         self.button(controls,'Software Update',self.open_software_update)
         self.button(controls,'Test print',self.test_print)
+        self.data_dir_label = ttk.Label(frame, text=f'Current data folder: {get_data_dir()}', foreground='#0b3d32', font=('Segoe UI', 10, 'bold'))
+        self.data_dir_label.pack(anchor='w', pady=(8, 0))
         if self.development_mode:
             self.button(controls,'⚡ Print Stress Test',self.print_stress_test)
         self.button(controls,'Users & Privileges',self.open_users)
@@ -1331,6 +1336,18 @@ class App(ReturnActions, tk.Tk):
         self.button(backup,'Restore Data',self.restore)
         ttk.Label(frame,text='Save backups to a USB drive regularly. Restoring replaces your current shop data.',wraplength=850).pack(anchor='w',pady=18)
         self.backup_status.set(f"Last Backup: {self.store.settings().get('last_backup') or 'Never'}")
+
+    def choose_data_folder(self):
+        folder = filedialog.askdirectory(title='Choose where to store this shop data', parent=self)
+        if not folder:
+            return
+        custom_dir = Path(folder).expanduser().resolve()
+        config_path = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'SanitaryShopPOS' / 'data-dir.txt'
+        set_data_dir(custom_dir, config_path=config_path)
+        self.settings_status.set(f'Data folder set: {custom_dir}. Restart the app to use it.')
+        self.status.set('Data folder updated. Restart the app to use the new location.')
+        if hasattr(self, 'data_dir_label'):
+            self.data_dir_label.configure(text=f'Current data folder: {get_data_dir()}')
 
     def open_users(self):
         self.require('users.manage')
@@ -1411,6 +1428,9 @@ class App(ReturnActions, tk.Tk):
     def background_update_check(self):
         if self._closed:
             return
+        if self.development_mode or not getattr(sys, 'frozen', False):
+            return
+        self.update_check_job = self.after(60 * 60 * 1000, self.background_update_check)
         state = self.store.security_state()
         settings = self.store.settings()
         if settings.get('update_auto_check', 'On') == 'On' and updater.check_due(state.get('update_last_check'), int(__import__('time').time())):
@@ -1481,12 +1501,11 @@ class App(ReturnActions, tk.Tk):
             do_check()
 
     def _check_updates_worker(self, manual, callback=None):
+        error = None
         try:
             manifest = updater.fetch_manifest()
-            error = None
-        except UserError as error:
-            manifest = None
-        except Exception as error:
+        except Exception as exc:
+            error = exc
             manifest = None
         if getattr(self, '_closed', False):
             return
@@ -1495,9 +1514,16 @@ class App(ReturnActions, tk.Tk):
             if callback:
                 self.after(0, callback, manifest, error)
             elif manifest and updater.newer_version(manifest['latest_version']):
-                self.after(0, lambda: self.update_status.set(f"Version {manifest['latest_version']} is available."))
+                self.after(0, self._show_available_update, manifest)
         except Exception:
             pass
+
+    def _show_available_update(self, manifest):
+        self.update_status.set(f"Version {manifest['latest_version']} is available.")
+        if not getattr(self, 'update_notice', None):
+            self.update_notice = ttk.Button(self.header_user.master, command=self.open_software_update)
+            self.update_notice.pack(anchor='e', pady=(5, 0))
+        self.update_notice.configure(text=f"Update available: {manifest['latest_version']}")
 
     def _download_update_worker(self, manifest, dialog, status, progress):
         def report(value):
@@ -1506,6 +1532,14 @@ class App(ReturnActions, tk.Tk):
         try:
             package = updater.download_verified(manifest, progress=report)
             updater.verify_windows_signature(package)
+            self.after(0, self._install_downloaded_update, package, status)
+        except Exception as error:
+            self.after(0, status.set, str(error))
+
+    def _install_downloaded_update(self, package, status):
+        # SQLite and Tk belong to the main thread; download workers must not use the store.
+        try:
+            self.require('software.update')
             updater.update_backup(self.store)
             env = os.environ | {'SANITARY_POS_UPDATE_PID': str(os.getpid()), 'SANITARY_POS_UPDATE_SETUP': str(package)}
             subprocess.Popen(['powershell.exe', '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
@@ -1514,7 +1548,7 @@ class App(ReturnActions, tk.Tk):
             self.after(0, self.close)
         except UserError as error:
             self.after(0, status.set, str(error))
-        except OSError:
+        except Exception:
             self.after(0, status.set, 'The update could not be installed. Your current version is still available.')
 
     def open_license_info(self):

@@ -12,9 +12,11 @@ import urllib.request
 
 from .db import UserError
 from .version import APP_VERSION
+from .licensing import PUBLIC_KEY_HEX
 
-UPDATE_MANIFEST_URL = ''
-UPDATE_MANIFEST_PUBLIC_KEY_HEX = ''
+UPDATE_REPOSITORY = 'zuhairzeb/sanitary-shop-pos-updates'
+UPDATE_MANIFEST_URL = f'https://github.com/{UPDATE_REPOSITORY}/releases/latest/download/update.json'
+UPDATE_MANIFEST_PUBLIC_KEY_HEX = PUBLIC_KEY_HEX
 EXPECTED_PUBLISHER = ''
 CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 VERSION_PATTERN = re.compile(r'^(\d+)\.(\d+)\.(\d+)$')
@@ -51,6 +53,8 @@ def validate_manifest(document):
 
 
 def _verify_manifest_signature(document):
+    if not isinstance(document, dict):
+        raise UserError('The update information is invalid.')
     if not UPDATE_MANIFEST_PUBLIC_KEY_HEX:
         return
     signature = document.get('signature')
@@ -67,7 +71,9 @@ def _verify_manifest_signature(document):
         raise UserError('The update information could not be verified.') from None
 
 
-def fetch_manifest(url=UPDATE_MANIFEST_URL, timeout=8):
+def fetch_manifest(url=None, timeout=8):
+    if url is None:
+        url = UPDATE_MANIFEST_URL
     if not url:
         raise UserError('Software updates are not configured yet.')
     if not url.lower().startswith('https://'):
@@ -76,6 +82,10 @@ def fetch_manifest(url=UPDATE_MANIFEST_URL, timeout=8):
     try:
         with urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
             document = json.loads(response.read(256 * 1024).decode('utf-8'))
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise UserError('No update has been published yet. You can continue using the POS normally.') from None
+        raise UserError('The update service is unavailable. Please try again later.') from None
     except (OSError, urllib.error.URLError, ValueError, UnicodeError):
         raise UserError('No internet connection. You can continue using the POS normally.') from None
     _verify_manifest_signature(document)

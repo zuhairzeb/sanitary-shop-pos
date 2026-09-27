@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import sys
 
+from sanitary_pos.config import get_data_dir
+
 
 def enable_windows_dpi_awareness():
     if os.name != 'nt' or (not getattr(sys, 'frozen', False) and os.environ.get('POS_DPI_AWARE') != '1'):
@@ -35,14 +37,16 @@ from sanitary_pos.auth_ui import SecurityScreen
 
 def main():
     parser = argparse.ArgumentParser(description='Offline sanitary shop billing')
-    parser.add_argument('--data-dir', type=Path, default=Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'SanitaryShopPOS')
+    parser.add_argument('--data-dir', type=Path, default=None)
     parser.add_argument('--smoke-test', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--performance-test-db', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.performance_test_db and getattr(sys, 'frozen', False):
         raise RuntimeError('Performance test mode is available only from the developer source checkout.')
-    database_path = args.data_dir if args.performance_test_db else args.data_dir / 'shop.sqlite3'
-    data_dir = database_path.parent if args.performance_test_db else args.data_dir
+    default_data_dir = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'SanitaryShopPOS'
+    selected_data_dir = Path(args.data_dir) if args.data_dir else get_data_dir(default_dir=default_data_dir)
+    database_path = selected_data_dir if args.performance_test_db else selected_data_dir / 'shop.sqlite3'
+    data_dir = database_path.parent if args.performance_test_db else selected_data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=data_dir / 'app.log', level=logging.ERROR)
     lock = open(data_dir / 'app.lock', 'a+b')

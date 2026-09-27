@@ -3,12 +3,22 @@ from pathlib import Path
 import tempfile
 import unittest
 import app
+from sanitary_pos.config import get_data_dir, set_data_dir
 from sanitary_pos.db import Store
 from sanitary_pos.ui import App
 from sanitary_pos.printing import preview, receipt_text
 
 
 class WindowTests(unittest.TestCase):
+    def test_custom_data_dir_is_persisted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder) / 'default'
+            custom = Path(folder) / 'custom-shop-data'
+            config_file = base / 'data-dir.txt'
+            base.mkdir(parents=True, exist_ok=True)
+            set_data_dir(custom, config_path=config_file)
+            self.assertEqual(get_data_dir(default_dir=base, config_path=config_file), custom.resolve())
+
     def test_scan_qr_uses_scanned_value(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'shop.sqlite3'
@@ -64,7 +74,9 @@ class WindowTests(unittest.TestCase):
                 receipt = preview(window, 'Receipt', text)
                 receipt.update()
                 receipt.destroy()
-                label = preview(window, 'Label', 'Master Basin', 'BASIN001')
+                label = preview(window, 'Label', '002633', 'BASIN001')
+                self.assertNotIn('Printed QR: 20 × 20 mm', str(label.winfo_children()))
+                self.assertTrue(any(child.winfo_class() == 'TLabel' and str(child.cget('text')) == '002633' for child in label.winfo_children()))
                 label.update()
                 label.destroy()
                 window.add_product(pid)

@@ -145,7 +145,8 @@ def preview(parent, title, text, qr=None, settings=None, auto_print=False):
         size = max(2, min(6, 360 // len(matrix)))
         canvas = tk.Canvas(window, width=len(matrix)*size, height=len(matrix)*size, bg='white', highlightthickness=0)
         canvas.pack(pady=10)
-        ttk.Label(window, text='Printed QR: 20 × 20 mm · product code below').pack()
+        code_text = str(text or qr).strip() or str(qr)
+        ttk.Label(window, text=code_text, font=('Segoe UI', 12, 'bold'), wraplength=480).pack(pady=(0, 8))
         for y, row in enumerate(matrix):
             for x, black in enumerate(row):
                 if black:

@@ -1,0 +1,4 @@
+Online updates can now be downloaded from inside the POS.
+QR previews show the actual QR value below the image.
+Products support searchable shelf, rack and godown locations.
+Improved update error handling and database backup compatibility.

@@ -1,4 +1,4 @@
-# Sanitary Shop POS 1.2.3
+# Sanitary Shop POS 1.2.5
 
 A Windows desktop cash register that stores products, bills, stock and backups on the laptop. No accounts, browser, internet, Python installation or database server is needed by the shopkeeper.
 
@@ -8,6 +8,7 @@ Copy `SanitaryShopPOS-Setup.exe` from `dist` to a Windows 10/11 x64 laptop. Open
 
 1. In **Settings**, enter the shop name, phone and address.
 2. In **Products**, add a name, unique code, prices and stock. Leave QR value blank to use the product code.
+   Use **Location / Shelf / Rack** for a custom storage location, such as `Godown B / Rack 12`. It is searchable in Products and saved with the product in the shop database and its backups.
 3. Select a product and choose **Print QR label**. View the QR, set copies and print. Choose paper dimensions in the Windows printer dialog; each copy is one label.
 4. In **Billing**, click the large search box or press F2. Type part of a name, code, category or brand, or scan with a USB QR scanner configured as a keyboard with an Enter suffix.
 5. Repeated scans increase quantity. Select a bill row to adjust quantity or remove it. Enter discount and payment; blank payment means paid in full.

@@ -10,3 +10,5 @@ if ($LASTEXITCODE -ne 0) { throw 'The executable build failed.' }
 Copy-Item -LiteralPath README.md -Destination dist/SanitaryShopPOS/README.md -Force
 python -m PyInstaller --noconfirm --clean --windowed --onefile --name SanitaryShopPOS-Setup --add-data 'dist/SanitaryShopPOS;payload' installer.py
 if ($LASTEXITCODE -ne 0) { throw 'The installer build failed.' }
+python developer_tools/record_build.py
+if ($LASTEXITCODE -ne 0) { throw 'Could not record the installer version and hash.' }

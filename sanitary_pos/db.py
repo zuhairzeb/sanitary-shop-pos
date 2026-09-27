@@ -90,10 +90,10 @@ class Store:
         self.conn.execute('PRAGMA synchronous=FULL')
         self.conn.execute('PRAGMA journal_mode=WAL')
         version = self.conn.execute('PRAGMA user_version').fetchone()[0]
-        if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8):
+        if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9):
             raise UserError('This data needs a newer version of the software.')
         self.conn.executescript(SCHEMA)
-        migration_backup = self._migration_backup() if version and version < 8 else None
+        migration_backup = self._migration_backup() if version and version < 9 else None
         try:
             if version < 2:
                 self._migrate_v2()
@@ -109,6 +109,8 @@ class Store:
                 self._migrate_v7()
             if version < 8:
                 self._migrate_v8()
+            if version < 9:
+                self._migrate_v9()
         except Exception as error:
             if migration_backup:
                 with closing(sqlite3.connect(migration_backup)) as source:
@@ -123,6 +125,13 @@ class Store:
         with closing(sqlite3.connect(destination)) as target:
             self.conn.backup(target)
         return destination
+
+    def _migrate_v9(self):
+        with self.conn:
+            existing = {row[1] for row in self.conn.execute('PRAGMA table_info(products)')}
+            if 'location' not in existing:
+                self.conn.execute("ALTER TABLE products ADD COLUMN location TEXT NOT NULL DEFAULT ''")
+            self.conn.execute('PRAGMA user_version=9')
 
     def _migrate_v2(self):
         with self.conn:
@@ -519,8 +528,9 @@ class Store:
                 for term in terms or ['']:
                         clauses.append('''(instr(lower(name),lower(?))>0 OR instr(lower(code),lower(?))>0 OR
                             instr(lower(category),lower(?))>0 OR instr(lower(brand),lower(?))>0 OR
-                            instr(lower(size_variant),lower(?))>0 OR instr(lower(qr),lower(?))>0)''')
-                        args.extend([term] * 6)
+                            instr(lower(size_variant),lower(?))>0 OR instr(lower(qr),lower(?))>0 OR
+                            instr(lower(location),lower(?))>0)''')
+                        args.extend([term] * 7)
                 return self.conn.execute('SELECT * FROM products WHERE active=1 AND ' + ' AND '.join(clauses) + ' ORDER BY name COLLATE NOCASE', args).fetchall()
 
     def product(self, product_id):
@@ -535,6 +545,7 @@ class Store:
     def save_product(self, values, product_id=None):
         self.require('products.edit' if product_id else 'products.add')
         data = {key: str(values.get(key, '')).strip() for key in ('name','code','qr','category','brand','size_variant','unit','description')}
+        data['location'] = str(values.get('location', self.product(product_id)['location'] if product_id else '')).strip()
         if not data['name'] or not data['code'] or not data['unit']:
             raise UserError('Enter a product name, code and unit.')
         data['qr'] = data['qr'] or data['code']
@@ -734,14 +745,14 @@ class Store:
         try:
             with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as check:
                 backup_version = check.execute('PRAGMA user_version').fetchone()[0]
-                if check.execute('PRAGMA integrity_check').fetchone()[0] != 'ok' or backup_version not in (1, 2, 3, 4, 5, 6, 7, 8):
+                if check.execute('PRAGMA integrity_check').fetchone()[0] != 'ok' or backup_version not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
                     raise ValueError()
                 expected = {'products': {'id','code','qr','name','category','brand','purchase_paisa','selling_paisa','stock_milli','unit','description','active'}, 'sales': {'id','token','created_at','subtotal_paisa','discount_paisa','total_paisa','paid_paisa','shop_json'}, 'sale_items': {'id','sale_id','product_id','name','code','unit','quantity_milli','price_paisa','total_paisa'}, 'stock_movements': {'id','product_id','delta_milli','reason','created_at'}, 'settings': {'key','value'}, 'draft': {'id','payload'}}
                 if backup_version == 2:
                     expected['products'] |= {'size_variant'}
                     expected['sales'] |= {'change_paisa','taxable_paisa','gst_rate_bps','gst_paisa'}
                     expected['sale_items'] |= {'size_variant'}
-                if backup_version in (3, 4, 5, 6, 7, 8):
+                if backup_version >= 3:
                     expected['products'] |= {'size_variant'}
                     expected['sales'] |= {'change_paisa','taxable_paisa','gst_rate_bps','gst_paisa'}
                     expected['sale_items'] |= {'size_variant'}
@@ -760,6 +771,8 @@ class Store:
                     expected['return_items'] |= {'size_variant','original_unit_price_paisa','returned_to_stock'}
                 if backup_version >= 8:
                     expected['sales'] |= {'archived'}
+                if backup_version >= 9:
+                    expected['products'] |= {'location'}
                 for table, columns in expected.items():
                     if {r[1] for r in check.execute(f'PRAGMA table_info({table})')} != columns:
                         raise ValueError()
