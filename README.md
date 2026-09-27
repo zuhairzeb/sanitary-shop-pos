@@ -1,4 +1,4 @@
-# Sanitary Shop POS 1.2.5
+# Sanitary Shop POS 1.2.6
 
 A Windows desktop cash register that stores products, bills, stock and backups on the laptop. No accounts, browser, internet, Python installation or database server is needed by the shopkeeper.
 
